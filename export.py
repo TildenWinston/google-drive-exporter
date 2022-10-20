@@ -31,7 +31,7 @@ APPLICATION_NAME   = 'Drive API Python Exporter'
 DESTINATION_DIR    = '/media/sf_google_docs_backup'
 #DESTINATION_DIR    = '/media/sf_TEMP'
 DB_ENABLED         = "true"
-DB_USER            = "dbuser"
+DB_USER            = "root"
 DB_PASSWORD        = ""
 DB_HOST            = "127.0.0.1"
 DB_PORT            = 3306
@@ -61,7 +61,7 @@ TYPE_TO_GOOGLE_MIME_TYPE = {
 }
 
 # Reverse the TYPE_TO_GOOGLE_MIME_TYPE mapping.
-GOOGLE_MIME_TYPE_TO_TYPE = dict((v, k) for k, v in TYPE_TO_GOOGLE_MIME_TYPE.iteritems())
+GOOGLE_MIME_TYPE_TO_TYPE = dict((v, k) for k, v in TYPE_TO_GOOGLE_MIME_TYPE.items())
 
 # Mapping from document type to MIME type. See also
 # https://developers.google.com/drive/v3/web/manage-downloads
@@ -134,13 +134,17 @@ def db_connect():
             password=DB_PASSWORD,
             host=DB_HOST,
             port=DB_PORT,
-            database=DB_DATABASE
+            database=DB_DATABASE,
             autocommit=False
-
         )
         return conn
+
     except mariadb.Error as e:
         print(f"Error connecting to MariaDB Platform: {e}")
+        return False
+
+    except Exception as e:
+        print(f"Some error occured: {e}")
         return False
 
 # Create a file with the given contents
@@ -159,7 +163,7 @@ def get_credentials():
 
     debug_progress('getting secret from secret file and creating credentials object')
     scopes      = [SCOPES]
-    credentials = ServiceAccountCredentials.from_json_keyfile_name(CLIENT_SECRET_FILE, scopes=scopes)
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(CLIENT_SECRET_FILE, ''.join(scopes))
     http_auth   = credentials.authorize(Http())
 
     return http_auth
@@ -400,12 +404,42 @@ def parse_arguments():
                         )
 
     # TODO Finish Parsing DB Vals
-    help_text_DB_ENABLED = """Show more detailed help."""
-    parser.add_argument("--help-extended",
-                        help=help_text_help_extended,
-                        action="store_true"
+    help_text_db_enabled = """True enables DB caching, False disables db caching"""
+    parser.add_argument("--db-enabled",
+                        help=help_text_db_enabled,
                         )
 
+    help_text_db_user = """Username for the db"""
+    parser.add_argument("--db-user",
+                        help=help_text_db_user,
+                        )
+
+    help_text_db_password = """Password for the db"""
+    parser.add_argument("--db-password",
+                        help=help_text_db_password,
+                        )
+
+    help_text_db_host = """Hostname for the db"""
+    parser.add_argument("--db-host",
+                        help=help_text_db_host,
+                        )
+                        
+    help_text_db_port = """Port number for the db"""
+    parser.add_argument("--db-port",
+                        help=help_text_db_port,
+                        )
+
+    help_text_db_database = """Database name for the db"""
+    parser.add_argument("--db-user",
+                        help=help_text_db_database,
+                        )
+
+    help_text_db_threshhold = """File size threshhold for entries getting added to 
+    the DB or for checking the DB for a file. Strives to balance time spent downloading
+     files and time spent querrying the DB"""
+    parser.add_argument("--db-threshhold",
+                        help=help_text_db_threshhold,
+                        )
     # print(help_text_extended)
 
     # sys.exit(0)
@@ -512,6 +546,17 @@ def main():
         cur = db_connect()
         if cur != False:
             cur = db_connect.cursor()
+
+            try:
+                cur
+
+                
+                
+
+            except Exception as e:
+                print(f"Error: {e}"
+                        
+
 
     first_pass = True
     nextPageToken = None
