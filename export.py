@@ -39,6 +39,7 @@ DB_DATABASE        = "employees"
 DB_THRESHHOLD      = 10000
 
 
+
 # A convenience hash to map from short document type to official
 # Google mime-type. See also
 # https://developers.google.com/drive/v3/web/mime-types
@@ -163,7 +164,7 @@ def get_credentials():
 
     debug_progress('getting secret from secret file and creating credentials object')
     scopes      = [SCOPES]
-    credentials = ServiceAccountCredentials.from_json_keyfile_name(CLIENT_SECRET_FILE, ''.join(scopes))
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(CLIENT_SECRET_FILE, scopes=''.join(scopes))
     http_auth   = credentials.authorize(Http())
 
     return http_auth
@@ -430,7 +431,7 @@ def parse_arguments():
                         )
 
     help_text_db_database = """Database name for the db"""
-    parser.add_argument("--db-user",
+    parser.add_argument("--db-database",
                         help=help_text_db_database,
                         )
 
@@ -548,13 +549,10 @@ def main():
             cur = db_connect.cursor()
 
             try:
-                cur
-
-                
-                
+                cur.execute("CREATE DATABASE IF NOT EXISTS ?", ({DB_DATABASE}))
 
             except Exception as e:
-                print(f"Error: {e}"
+                print(f"Error: {e}")
                         
 
 
@@ -563,10 +561,10 @@ def main():
     filesListed = 0
     pageSize = 10
     while (first_pass or nextPageToken):
-        results = service.files().list(pageSize={pageSize},
+        results = service.files().list(pageSize=pageSize,
                                        pageToken=nextPageToken,
-                                       fields="nextPageToken, kind, files(id, name, mimeType, webContentLink, size, md5Checksum)").execute()
-        nextPageToken = results.get('nextPageToken')
+                                       fields="nextPageToken, kind, files(id, name, mimeType, webContentLink)").execute()
+        results.get('nextPageToken')
         
         filesListed += pageSize
         if (filesListed % 10000) == 0:
