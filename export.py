@@ -30,8 +30,8 @@ CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME   = 'Drive API Python Exporter'
 DESTINATION_DIR    = '/media/sf_google_docs_backup'
 #DESTINATION_DIR    = '/media/sf_TEMP'
-DB_ENABLED         = "true"
-DB_USER            = "root"
+DB_ENABLED         = "True"
+DB_USER            = "pythonUser"
 DB_PASSWORD        = ""
 DB_HOST            = "127.0.0.1"
 DB_PORT            = 3306
@@ -151,7 +151,7 @@ def db_connect():
 # Create a file with the given contents
 def spew(contents, filename):
     full_path = os.path.join(DESTINATION_DIR, filename)
-    with open(full_path,'w') as f:
+    with open(full_path,'wb') as f:
         f.write(contents)
     return full_path
 
@@ -240,13 +240,16 @@ def process_current_db(service, results, types_to_export, export_formats, destin
         name            = item['name']
         id              = item['id']
         google_mimetype = item['mimeType']
-        size            = item['size']
-        md5Hash         = item['md5Checksum']
+        
 
         # We never export folders.
         if (google_mimetype == 'application/vnd.google-apps.folder'):
             debug_progress('skipping folder \'{0}\''.format(name))
             continue
+
+        # Moving because folders do not have these fields
+        size            = item['size']
+        md5Hash         = item['md5Checksum']
 
         # Check Database
         completed = False
@@ -324,13 +327,16 @@ def process_current(service, results, types_to_export, export_formats, destinati
         name            = item['name']
         id              = item['id']
         google_mimetype = item['mimeType']
-        size            = item['size']
-        md5Hash         = item['md5Checksum']
+        
 
         # We never export folders.
         if (google_mimetype == 'application/vnd.google-apps.folder'):
             debug_progress('skipping folder \'{0}\''.format(name))
             continue
+
+        # Moving because folders do not have these fields
+        size            = item['size']
+        md5Hash         = item['md5Checksum']
 
         # Checks either all files should be exported or that
         # the item is of a specified type
@@ -404,7 +410,7 @@ def parse_arguments():
                         action="store_true"
                         )
 
-    # TODO Finish Parsing DB Vals
+    # DB related
     help_text_db_enabled = """True enables DB caching, False disables db caching"""
     parser.add_argument("--db-enabled",
                         help=help_text_db_enabled,
@@ -538,6 +544,21 @@ def main():
     # exported, or, if the empty array, means we want to export ALL file
     # types.
 
+    # Database Args reading
+    if args.db_enabled:
+        global DB_ENABLED
+        DB_ENABLED = args.db_enabled
+    
+    if args.db_password:
+        global DB_PASSWORD
+        DB_PASSWORD = args.db_password
+
+    if args.db_host:
+        global DB_HOST
+        DB_HOST = args.db_host
+
+    # TODO Finish Parsing DB Vals
+
     http_auth = get_credentials()
     service   = discovery.build('drive', 'v3', http=http_auth)
     debug_progress('created Google Drive service object')
@@ -563,7 +584,7 @@ def main():
     while (first_pass or nextPageToken):
         results = service.files().list(pageSize=pageSize,
                                        pageToken=nextPageToken,
-                                       fields="nextPageToken, kind, files(id, name, mimeType, webContentLink)").execute()
+                                       fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
         results.get('nextPageToken')
         
         filesListed += pageSize
@@ -572,6 +593,9 @@ def main():
         
         if cur != False:
             process_current_db(service, results, types, args.export_formats, destination_dir, cur)
+
+        else:
+             process_current(service, results, types, args.export_formats, destination_dir)
 
         first_pass = False
 
