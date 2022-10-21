@@ -2,6 +2,7 @@
 # Adapted from https://developers.google.com/drive/v3/web/quickstart/python
 
 from __future__ import print_function
+import io
 import mimetypes
 from winreg import REG_RESOURCE_REQUIREMENTS_LIST
 import httplib2
@@ -19,6 +20,9 @@ from oauth2client import client
 from oauth2client import tools
 from oauth2client.service_account import ServiceAccountCredentials
 from httplib2 import Http
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaIoBaseDownload
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -37,6 +41,7 @@ DB_HOST            = "127.0.0.1"
 DB_PORT            = 3306
 DB_DATABASE        = "employees"
 DB_THRESHHOLD      = 10000
+DB_TABLE           = "downloadStatus"
 
 
 
@@ -222,8 +227,9 @@ def build_type_to_export_format(export_format):
 
    return type_to_export_format
 
-def process_current_db(service, results, types_to_export, export_formats, destination_dir, cur):
+def process_current_db(service, results, types_to_export, export_formats, destination_dir, conn):
     export_all = True
+    cur = conn.cursor()
 
     # Convert types into an array of google types.
     google_types_to_export = []
@@ -253,10 +259,9 @@ def process_current_db(service, results, types_to_export, export_formats, destin
         # Check Database
         completed = False
 
-        if size > DB_THRESHHOLD:
-            cur.execute(
-            "SELECT name,id,mimeType,size,md5Checksum,status FROM {DB_DATABASE} WHERE id=?", 
-            (id))
+        if int(size) > DB_THRESHHOLD:
+            query = f'SELECT name,id,mimeType,size,md5Checksum,status FROM {DB_TABLE} WHERE id=\'{id}\''
+            cur.execute(query)
             if cur.rowcount >= 1:
                 for result in cur:
                     if (result.id is id) and result.status and result.md5Checksum is md5Hash:
@@ -296,18 +301,33 @@ def process_current_db(service, results, types_to_export, export_formats, destin
 
             if (export_mimetype):
                 results_of_export = service.files().export(fileId=id, mimeType=export_mimetype).execute()
+                full_path = spew(results_of_export, full_destination_path)
             else:
-                results_of_export = service.files().get_media(fileId=id).execute()
+                try:
+                    request = service.files().get_media(fileId=id)
+                    file = io.FileIO(full_destination_path, 'wb')
+                    downloader = MediaIoBaseDownload(file, request, 1024*1024*1024)
+                    done = False
+                    while done is False:
+                        status, done = downloader.next_chunk()
+                        print(F'Download {int(status.progress() * 100)}.')
+                
+                except HttpError as error:
+                    print(F'An error occurred: {error}')
+                    file = None
 
-            full_path = spew(results_of_export, full_destination_path)
+
+
+            # full_path = spew(results_of_export, full_destination_path)
             debug_progress('exported to file {0}'.format(full_destination_path))
             # progress('exported file \'{0}\' to file \'{1}\' [{2}]'.format(name, full_path, export_mimetype))
 
             #Add success to DB
-            if size > DB_THRESHHOLD:
-                cur.execute("INSERT INTO {DB_DATABSE} (name,id,mimeType,size,md5Checksum,status) VALUES (?, ?)", (name, id, google_mimetype, size, md5Hash, True))
+            if int(size) > DB_THRESHHOLD:
+                query = f'INSERT INTO {DB_TABLE} (name,id,mimeType,size,md5Checksum,status) VALUES (\'{name}\', \'{id}\', \'{google_mimetype}\', {size}, \'{md5Hash}\', True)'
+                cur.execute(query)
     
-    cur.commit()
+    conn.commit()
 
 def process_current(service, results, types_to_export, export_formats, destination_dir):
     export_all = True
@@ -562,15 +582,29 @@ def main():
     service   = discovery.build('drive', 'v3', http=http_auth)
     debug_progress('created Google Drive service object')
 
-    cur = False
+    conn = False
     if DB_ENABLED:
-        cur = db_connect()
-        if cur != False:
-            cur = cur.cursor()
+        conn = db_connect()
+        if conn != False:
+            cur = conn.cursor()
 
             try:
                 # Not the safest way to build a query, but for local use, this should be acceptable
                 query = f'CREATE DATABASE IF NOT EXISTS `{DB_DATABASE}`'
+                cur.execute(query)
+                query = f'USE `{DB_DATABASE}`'
+                cur.execute(query)
+                query = f"""CREATE TABLE IF NOT EXISTS `{DB_TABLE}` (
+	            `id` VARCHAR(50) NOT NULL COLLATE 'latin1_swedish_ci',
+	            `name` VARCHAR(260) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
+	            `mimeType` VARCHAR(100) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
+	            `size` BIGINT(20) NULL DEFAULT NULL,
+                `md5Checksum` VARCHAR(33) NULL DEFAULT NULL,
+                `status` VARCHAR(50) NULL DEFAULT NULL
+                )
+                COLLATE='latin1_swedish_ci'
+                ENGINE=InnoDB
+                ;"""
                 cur.execute(query)
 
             except Exception as e:
@@ -592,8 +626,8 @@ def main():
         if (filesListed % 10000) == 0:
             progress("Exported: {0}".format(filesListed))
         
-        if cur != False:
-            process_current_db(service, results, types, args.export_formats, destination_dir, cur)
+        if conn != False:
+            process_current_db(service, results, types, args.export_formats, destination_dir, conn)
 
         else:
              process_current(service, results, types, args.export_formats, destination_dir)
