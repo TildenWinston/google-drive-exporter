@@ -62,3 +62,6 @@ External Libraries required:
 they can be installed by using:
 `pip install google-api-python-client oauth2client mariadb`
 
+Database notes:
+user should have the appropiate permissions for creating and editing the speciifed database.
+https://stackoverflow.com/questions/8838777/error-1044-42000-access-denied-for-user-localhost-to-database-db
