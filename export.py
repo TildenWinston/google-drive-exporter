@@ -135,7 +135,6 @@ def db_connect():
             password=DB_PASSWORD,
             host=DB_HOST,
             port=DB_PORT,
-            database=DB_DATABASE,
             autocommit=False
         )
         return conn
@@ -567,10 +566,12 @@ def main():
     if DB_ENABLED:
         cur = db_connect()
         if cur != False:
-            cur = db_connect.cursor()
+            cur = cur.cursor()
 
             try:
-                cur.execute("CREATE DATABASE IF NOT EXISTS ?", ({DB_DATABASE}))
+                # Not the safest way to build a query, but for local use, this should be acceptable
+                query = f'CREATE DATABASE IF NOT EXISTS `{DB_DATABASE}`'
+                cur.execute(query)
 
             except Exception as e:
                 print(f"Error: {e}")
