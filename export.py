@@ -23,6 +23,9 @@ from httplib2 import Http
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -33,7 +36,9 @@ SCOPES             = 'https://www.googleapis.com/auth/drive.readonly'
 CLIENT_SECRET_FILE = 'client_secret.json'
 APPLICATION_NAME   = 'Drive API Python Exporter'
 DESTINATION_DIR    = '/media/sf_google_docs_backup'
+AUTH_METHOD        = ''
 #DESTINATION_DIR    = '/media/sf_TEMP'
+#DB Caching related settings
 DB_ENABLED         = "True"
 DB_USER            = "pythonUser"
 DB_PASSWORD        = ""
@@ -264,7 +269,7 @@ def process_current_db(service, results, types_to_export, export_formats, destin
             cur.execute(query)
             if cur.rowcount >= 1:
                 for result in cur:
-                    if (result.id is id) and result.status and result.md5Checksum is md5Hash:
+                    if (result[1] == id) and result[5] and result[4] == md5Hash:
                         completed = True
                         break
 
@@ -422,13 +427,20 @@ def parse_arguments():
     parser.add_argument("--destination-dir",
                         help=help_text_destination_dir,
                         )
+
+    # --auth-method
+    help_text_auth_method = """Authentication style to use for the script. 
+    The script can either use a service account or can use OAUTH. The 
+    two valid options are: 'serviceaccount' or 'oauth' """    
+    parser.add_argument("--auth-method",
+                        help=help_text_auth_method,
+                        )      
     # --help-extended
     help_text_help_extended = """Show more detailed help."""
     parser.add_argument("--help-extended",
                         help=help_text_help_extended,
                         action="store_true"
                         )
-
     # DB related
     help_text_db_enabled = """True enables DB caching, False disables db caching"""
     parser.add_argument("--db-enabled",
@@ -578,10 +590,47 @@ def main():
 
     # TODO Finish Parsing DB Vals
 
-    http_auth = get_credentials()
-    service   = discovery.build('drive', 'v3', http=http_auth)
-    debug_progress('created Google Drive service object')
+    if args.auth_method:
+        global AUTH_METHOD
+        AUTH_METHOD = args.auth_method
 
+    if AUTH_METHOD == "serviceaccount":
+        http_auth = get_credentials()
+        service   = discovery.build('drive', 'v3', http=http_auth)
+        debug_progress('created Google Drive service object')
+    
+    elif AUTH_METHOD == "oauth":
+        """Shows basic usage of the Drive v3 API.
+        Prints the names and ids of the first 10 files the user has access to.
+        """
+        creds = None
+        # The file token.json stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+            # Save the credentials for the next run
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+
+        try:
+            service = build('drive', 'v3', credentials=creds)
+
+        except HttpError as error:
+            # TODO(developer) - Handle errors from drive API.
+            exit_with_error('An error occured: \'{0}\''.format(error))
+
+    else:
+        exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oath' are currently supported. {AUTH_METHOD} is not supported.")
+        
     conn = False
     if DB_ENABLED:
         conn = db_connect()
@@ -590,10 +639,15 @@ def main():
 
             try:
                 # Not the safest way to build a query, but for local use, this should be acceptable
+                # Create the database if it doesn't exist
                 query = f'CREATE DATABASE IF NOT EXISTS `{DB_DATABASE}`'
                 cur.execute(query)
+
+                # Selects the database
                 query = f'USE `{DB_DATABASE}`'
                 cur.execute(query)
+                
+                # Creates the table if it doesn't exist
                 query = f"""CREATE TABLE IF NOT EXISTS `{DB_TABLE}` (
 	            `id` VARCHAR(50) NOT NULL COLLATE 'latin1_swedish_ci',
 	            `name` VARCHAR(260) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
