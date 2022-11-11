@@ -321,6 +321,7 @@ def process_current(service, results, types_to_export, export_formats, destinati
                 try:
                     request = service.files().get_media(fileId=id)
                     file = io.FileIO(full_destination_path, 'wb')
+                    # [TODO] Should set chunk size dynaically. Value is in bytes, 1 Gibibyte currently set
                     downloader = MediaIoBaseDownload(file, request, 1024*1024*1024)
                     done = False
                     while done is False:
