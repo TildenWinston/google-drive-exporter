@@ -39,7 +39,7 @@ DESTINATION_DIR    = '/media/sf_google_docs_backup'
 AUTH_METHOD        = ''
 #DESTINATION_DIR    = '/media/sf_TEMP'
 #DB Caching related settings
-DB_ENABLED         = "True"
+DB_ENABLED         = True
 DB_USER            = "pythonUser"
 DB_PASSWORD        = ""
 DB_HOST            = "127.0.0.1"
@@ -47,6 +47,11 @@ DB_PORT            = 3306
 DB_DATABASE        = "employees"
 DB_THRESHHOLD      = 10000
 DB_TABLE           = "downloadStatus"
+
+#multithreading
+MULTITHREADED    = True
+MULTITHREADED_MAX_THREADS = 100
+
 
 
 
