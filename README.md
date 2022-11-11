@@ -61,7 +61,7 @@ External Libraries required:
 * google-auth-oauthlib
 
 they can be installed by using:
-`pip install google-api-python-client oauth2client mariadb`
+`pip install google-api-python-client oauth2client mariadb google-auth`
 
 Database notes:
 user should have the appropiate permissions for creating and editing the speciifed database.

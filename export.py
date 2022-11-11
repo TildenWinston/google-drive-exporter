@@ -232,9 +232,13 @@ def build_type_to_export_format(export_format):
 
    return type_to_export_format
 
-def process_current_db(service, results, types_to_export, export_formats, destination_dir, conn):
+def process_current(service, results, types_to_export, export_formats, destination_dir, conn):
     export_all = True
-    cur = conn.cursor()
+    usedb = False
+    cur = None
+
+    if conn != False:
+        cur = conn.cursor()
 
     # Convert types into an array of google types.
     google_types_to_export = []
@@ -259,17 +263,18 @@ def process_current_db(service, results, types_to_export, export_formats, destin
 
         # Moving because folders do not have these fields
         size            = item['size']
-        md5Hash         = item['md5Checksum']
+        # [TODO] Doesn't apply to google docs or sheets, etc so handling needs to be added
+        # md5Hash         = item['md5Checksum']
 
         # Check Database
         completed = False
 
-        if int(size) > DB_THRESHHOLD:
+        if cur is not None and (int(size) > DB_THRESHHOLD):
             query = f'SELECT name,id,mimeType,size,md5Checksum,status FROM {DB_TABLE} WHERE id=\'{id}\''
             cur.execute(query)
             if cur.rowcount >= 1:
                 for result in cur:
-                    if (result[1] == id) and result[5] and result[4] == md5Hash:
+                    if (result[1] == id) and result[5]: #and result[4] == md5Hash:
                         completed = True
                         break
 
@@ -328,76 +333,13 @@ def process_current_db(service, results, types_to_export, export_formats, destin
             # progress('exported file \'{0}\' to file \'{1}\' [{2}]'.format(name, full_path, export_mimetype))
 
             #Add success to DB
-            if int(size) > DB_THRESHHOLD:
+            if cur is not None and int(size) > DB_THRESHHOLD:
                 query = f'INSERT INTO {DB_TABLE} (name,id,mimeType,size,md5Checksum,status) VALUES (\'{name}\', \'{id}\', \'{google_mimetype}\', {size}, \'{md5Hash}\', True)'
                 cur.execute(query)
     
-    conn.commit()
+    if cur is not None:
+        conn.commit()
 
-def process_current(service, results, types_to_export, export_formats, destination_dir):
-    export_all = True
-
-    # Convert types into an array of google types.
-    google_types_to_export = []
-    for type in types_to_export:
-        google_types_to_export.append(TYPE_TO_GOOGLE_MIME_TYPE[type])
-        export_all = False
-
-    type_to_export_format = build_type_to_export_format(export_formats)
-
-    items = results.get('files', [])
-
-    for item in items:
-        name            = item['name']
-        id              = item['id']
-        google_mimetype = item['mimeType']
-        
-
-        # We never export folders.
-        if (google_mimetype == 'application/vnd.google-apps.folder'):
-            debug_progress('skipping folder \'{0}\''.format(name))
-            continue
-
-        # Moving because folders do not have these fields
-        size            = item['size']
-        md5Hash         = item['md5Checksum']
-
-        # Checks either all files should be exported or that
-        # the item is of a specified type
-        if (export_all or (google_mimetype in google_types_to_export)):
-            # Get the type from the Google mimetype
-            if (google_mimetype in GOOGLE_MIME_TYPE_TO_TYPE):
-                type = GOOGLE_MIME_TYPE_TO_TYPE[google_mimetype]
-            else:
-                # Unrecognized type, but that's OK as it just means it's
-                # not one we just download as-is.
-                type = None
-
-            debug_progress('found file to export of type \'{0}\''.format(type))
-
-            # Set export type (if this one of the types that can have the
-            # export format set)
-            if (type and (type in type_to_export_format)):
-                export_format   = type_to_export_format[type]
-                export_mimetype = TYPE_TO_EXPORTS[type][export_format]
-            else:
-                export_mimetype = None
-
-            debug_progress('export_mimetype is \'{0}\''.format(export_mimetype))
-            debug_progress('exporting \'{0}\'({1}): mimetype: {2}'.format(name, id, google_mimetype))
-
-            normalized_filename = normalize_filename(name)
-            full_destination_path = os.path.join(destination_dir, normalized_filename)
-            debug_progress('destination file full path is \'{0}\''.format(full_destination_path))
-
-            if (export_mimetype):
-                results_of_export = service.files().export(fileId=id, mimeType=export_mimetype).execute()
-            else:
-                results_of_export = service.files().get_media(fileId=id).execute()
-
-            full_path = spew(results_of_export, full_destination_path)
-            debug_progress('exported to file {0}'.format(full_destination_path))
-            # progress('exported file \'{0}\' to file \'{1}\' [{2}]'.format(name, full_path, export_mimetype))
 
 def parse_arguments():
     google_types = TYPE_TO_GOOGLE_MIME_TYPE.keys()
@@ -580,6 +522,10 @@ def main():
         global DB_ENABLED
         DB_ENABLED = args.db_enabled
     
+    if args.db_user:
+        global DB_USER
+        DB_USER = args.db_user
+
     if args.db_password:
         global DB_PASSWORD
         DB_PASSWORD = args.db_password
@@ -629,7 +575,7 @@ def main():
             exit_with_error('An error occured: \'{0}\''.format(error))
 
     else:
-        exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oath' are currently supported. {AUTH_METHOD} is not supported.")
+        exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oauth' are currently supported. {AUTH_METHOD} is not supported.")
         
     conn = False
     if DB_ENABLED:
@@ -665,7 +611,6 @@ def main():
                 print(f"Error: {e}")
                         
 
-
     first_pass = True
     nextPageToken = None
     filesListed = 0
@@ -680,11 +625,7 @@ def main():
         if (filesListed % 10000) == 0:
             progress("Exported: {0}".format(filesListed))
         
-        if conn != False:
-            process_current_db(service, results, types, args.export_formats, destination_dir, conn)
-
-        else:
-             process_current(service, results, types, args.export_formats, destination_dir)
+        process_current(service, results, types, args.export_formats, destination_dir, conn)
 
         first_pass = False
 
