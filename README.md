@@ -59,6 +59,8 @@ External Libraries required:
 * oauth2client
 * google-api-python-client
 * google-auth-oauthlib
+* google-auth
+* getfilelistpy
 
 they can be installed by using:
 `pip install google-api-python-client oauth2client mariadb google-auth`

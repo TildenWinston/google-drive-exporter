@@ -26,6 +26,7 @@ from googleapiclient.http import MediaIoBaseDownload
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
+from getfilelistpy import getfilelist # gets google drive folder structures
 
 pp = pprint.PrettyPrinter(indent=4)
 
@@ -582,7 +583,7 @@ def main():
 
     else:
         exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oauth' are currently supported. {AUTH_METHOD} is not supported.")
-        
+
     conn = False
     if DB_ENABLED:
         conn = db_connect()
@@ -615,7 +616,14 @@ def main():
 
             except Exception as e:
                 print(f"Error: {e}")
-                        
+
+    resource = {
+    "oauth2": creds,
+    "id": "1AeewIhj5g95yNfkmAnahjv24aipMnPEr",
+    "fields": "files(name,id)",
+}               
+    res = getfilelist.GetFileList(resource)
+    print(res)
 
     first_pass = True
     nextPageToken = None
