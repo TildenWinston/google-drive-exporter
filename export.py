@@ -624,7 +624,7 @@ def main():
         results = service.files().list(pageSize=pageSize,
                                        pageToken=nextPageToken,
                                        fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
-        results.get('nextPageToken')
+        nextPageToken = results.get('nextPageToken')
         
         filesListed += pageSize
         if (filesListed % 10000) == 0:
