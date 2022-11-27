@@ -61,8 +61,41 @@ External Libraries required:
 * google-auth-oauthlib
 
 they can be installed by using:
-`pip install google-api-python-client oauth2client mariadb`
+`pip install google-api-python-client oauth2client mariadb google-auth`
 
 Database notes:
 user should have the appropiate permissions for creating and editing the speciifed database.
 https://stackoverflow.com/questions/8838777/error-1044-42000-access-denied-for-user-localhost-to-database-db
+
+Usage:
+One possible usage for the script is to create a takeout of all of your account data and then use this script to download it all. Simply share the takeoutfiles with the service account created earlier. 
+
+To check that downloads were successful take the hash of the files and compare it to the hashes given by the google drive API.
+`md5deep -e -w * | tee hashes.txt`
+Then take those hashes and compare them to the list of hashses obtained from the API
+
+Next, in this use case, unzipping the files comes next. This bash script unzips the takeout files and puts them in a sub directory.
+
+    #!/bin/sh
+    for zip in *.zip
+    do
+      dirname=$(echo "$zip" | sed 's/\.zip$//')
+      echo $dirname
+      if mkdir ".//unzipped//${dirname}"
+      then
+        if cd ".//unzipped//${dirname}"
+        then
+          unzip "..//..//${zip}" -q
+          cd ../..
+          rm -f $zip # Uncomment to delete the original zip file
+        else
+          echo "Could not unpack $zip - cd failed"
+        fi
+      else
+        echo "Could not unpack $zip - mkdir failed"
+      fi
+    done
+
+
+
+
