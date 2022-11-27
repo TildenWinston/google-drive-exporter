@@ -334,6 +334,32 @@ def process_current_db(service, results, types_to_export, export_formats, destin
     
     conn.commit()
 
+def hash_it_out(results, types_to_export):
+    export_all = True
+
+    # Convert types into an array of google types.
+    google_types_to_export = []
+    for type in types_to_export:
+        google_types_to_export.append(TYPE_TO_GOOGLE_MIME_TYPE[type])
+        export_all = False
+
+    items = results.get('files', [])
+
+    for item in items:
+        name            = item['name']
+        google_mimetype = item['mimeType']
+        
+        # We never export folders.
+        if (google_mimetype == 'application/vnd.google-apps.folder'):
+            debug_progress('skipping folder \'{0}\''.format(name))
+            continue
+
+        # Moving because folders do not have these fields
+        md5Hash         = item['md5Checksum']
+
+        print(md5Hash)
+
+
 def process_current(service, results, types_to_export, export_formats, destination_dir):
     export_all = True
 
@@ -579,6 +605,10 @@ def main():
     if args.db_enabled:
         global DB_ENABLED
         DB_ENABLED = args.db_enabled
+        if DB_ENABLED.lower() == 'true':
+            DB_ENABLED = True
+        elif DB_ENABLED.lower() == 'false':
+            DB_ENABLED = False
     
     if args.db_password:
         global DB_PASSWORD
@@ -674,19 +704,21 @@ def main():
         results = service.files().list(pageSize=pageSize,
                                        pageToken=nextPageToken,
                                        fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
-        results.get('nextPageToken')
+        nextPageToken = results.get('nextPageToken')
         
         filesListed += pageSize
         if (filesListed % 10000) == 0:
             progress("Exported: {0}".format(filesListed))
         
-        if conn != False:
-            process_current_db(service, results, types, args.export_formats, destination_dir, conn)
+        hash_it_out(results, types)
+        # if conn != False:
+        #     process_current_db(service, results, types, args.export_formats, destination_dir, conn)
 
-        else:
-             process_current(service, results, types, args.export_formats, destination_dir)
-
+        # else:
+        #      process_current(service, results, types, args.export_formats, destination_dir)
+        
         first_pass = False
+
 
     debug_progress('Finished')
 
