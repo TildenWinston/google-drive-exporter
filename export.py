@@ -13,6 +13,7 @@ import pprint
 import copy
 import argparse
 import mariadb
+import threading
 
 from apiclient import discovery
 import oauth2client
@@ -647,3 +648,24 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+def getFileListAndAddToDB():
+    results = service.files().list(pageSize=pageSize,
+                                       pageToken=nextPageToken,
+                                       fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
+
+    for result in results:
+        # add to db
+
+def new_main():
+    max_threads = 12
+    # current_threads = 0 threading.activeCount()
+
+    # Get list of files and add them to the database
+    tGetFileList1 = threading.Thread()
+
+    # Fill in folder structure?
+    # tGetFolderStructure = threading.Thread()
+
+    # Start downloading files
+    tDownloadFile1 = threading.Thread()
