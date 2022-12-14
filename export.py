@@ -185,6 +185,85 @@ def get_credentials():
 
     return http_auth
 
+def db_setup(database, table):
+    conn = False
+    if DB_ENABLED:
+        conn = db_connect()
+        if conn != False:
+            cur = conn.cursor()
+
+            try:
+                # Not the safest way to build a query, but for local use, this should be acceptable
+                # Create the database if it doesn't exist
+                query = f'CREATE DATABASE IF NOT EXISTS `{database}`'
+                cur.execute(query)
+
+                # Selects the database
+                query = f'USE `{database}`'
+                cur.execute(query)
+                
+                # Creates the table if it doesn't exist
+                query = f"""CREATE TABLE IF NOT EXISTS `{table}` (
+	            `id` VARCHAR(50) NOT NULL COLLATE 'latin1_swedish_ci',
+	            `name` VARCHAR(260) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
+	            `mimeType` VARCHAR(100) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
+	            `size` BIGINT(20) NULL DEFAULT NULL,
+                `md5Checksum` VARCHAR(33) NULL DEFAULT NULL,
+                `sha256Checksum` VARCHAR(64) NULL DEFAULT NULL,
+                `status` VARCHAR(50) NULL DEFAULT NULL
+                )
+                COLLATE='latin1_swedish_ci'
+                ENGINE=InnoDB
+                ;"""
+                cur.execute(query)
+
+                conn.commit()
+
+            except Exception as e:
+                print(f"Error: {e}")
+    
+    return conn
+
+def authToGoogle():
+    if AUTH_METHOD == "serviceaccount":
+        http_auth = get_credentials()
+        service   = discovery.build('drive', 'v3', http=http_auth)
+        debug_progress('created Google Drive service object')
+    
+    elif AUTH_METHOD == "oauth":
+        """Shows basic usage of the Drive v3 API.
+        Prints the names and ids of the first 10 files the user has access to.
+        """
+        creds = None
+        # The file token.json stores the user's access and refresh tokens, and is
+        # created automatically when the authorization flow completes for the first
+        # time.
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        # If there are no (valid) credentials available, let the user log in.
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    'credentials.json', SCOPES)
+                creds = flow.run_local_server(port=0)
+            # Save the credentials for the next run
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+
+        try:
+            service = build('drive', 'v3', credentials=creds)
+
+        except HttpError as error:
+            # TODO(developer) - Handle errors from drive API.
+            exit_with_error('An error occured: \'{0}\''.format(error))
+
+    else:
+        exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oauth' are currently supported. {AUTH_METHOD} is not supported.")
+
+    return service
+
 def debug_progress(msg):
     if (DEBUG):
         print('debug_progress: ' + msg)
@@ -200,6 +279,14 @@ def normalize_filename(name):
 
     # Replace spaces with underscores
     # normalized =  re.sub(r"\s", '_', normalized)
+
+    return normalized
+
+def escape_quotes(name):
+    # Squish multiple spaces to a single space
+    normalized = re.sub(r"'", '\\\'', name)
+
+    # Replace ' with \'
 
     return normalized
 
@@ -239,6 +326,15 @@ def build_type_to_export_format(export_format):
 
    return type_to_export_format
 
+def build_google_types_to_export(types_to_export):
+    google_types_to_export = []
+    for type in types_to_export:
+        google_types_to_export.append(TYPE_TO_GOOGLE_MIME_TYPE[type])
+        export_all = False
+
+    return google_types_to_export
+
+
 def process_current(service, results, types_to_export, export_formats, destination_dir, conn):
     export_all = True
     usedb = False
@@ -249,6 +345,7 @@ def process_current(service, results, types_to_export, export_formats, destinati
 
     # Convert types into an array of google types.
     google_types_to_export = []
+
     for type in types_to_export:
         google_types_to_export.append(TYPE_TO_GOOGLE_MIME_TYPE[type])
         export_all = False
@@ -302,7 +399,7 @@ def process_current(service, results, types_to_export, export_formats, destinati
             debug_progress('found file to export of type \'{0}\''.format(type))
 
             # Set export type (if this one of the types that can have the
-            # export format set)
+            # export format set) for Google formats
             if (type and (type in type_to_export_format)):
                 export_format   = type_to_export_format[type]
                 export_mimetype = TYPE_TO_EXPORTS[type][export_format]
@@ -329,6 +426,14 @@ def process_current(service, results, types_to_export, export_formats, destinati
                     while done is False:
                         status, done = downloader.next_chunk()
                         print(F'Download {int(status.progress() * 100)}.')
+
+                    try:
+                        md5Hash     = item['md5Checksum']
+                        sha256Hash  = item['sha256Checksum']
+
+                    except Exception as e:
+                        md5Hash     = "NA"
+                        sha256Hash  = "NA"
                 
                 except HttpError as error:
                     print(F'An error occurred: {error}')
@@ -486,6 +591,84 @@ def exit_with_error(msg):
     print('error: ' + msg.strip())
     sys.exit(1)
 
+def getFileThread():
+    service = authToGoogle()
+    pageSize = 10
+    nextPageToken = None
+    first_pass = True
+    filesListed = 0
+    conn = db_setup(DB_DATABASE, DB_TABLE)
+
+    while (first_pass or nextPageToken):
+        nextPageToken = getFileListAndAddToDB(service, conn, pageSize, nextPageToken)
+        
+        filesListed += pageSize
+        if (filesListed % 1000) == 0:
+            progress("Exported: {0} files".format(filesListed))
+        
+        first_pass = False
+
+
+def getFileListAndAddToDB(service, conn, pageSize, nextPageToken):
+    results = service.files().list(pageSize=pageSize,
+                                       pageToken=nextPageToken,
+                                       fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, sha256Checksum, webContentLink)").execute()
+
+    if conn is False:
+        msg = 'Database not connected. Double check database connection and try again'
+        exit_with_error(msg)
+
+    cur = conn.cursor()
+
+    for file in results.get('files', []):
+        # add to db
+
+        name            = file['name']
+        id              = file['id']
+        google_mimetype = file['mimeType']
+
+        # Skip folders
+        if (google_mimetype == 'application/vnd.google-apps.folder'):
+            debug_progress('skipping folder \'{0}\''.format(name))
+            continue
+
+        # Moving because folders do not have these fields
+        size            = file['size']
+        
+        try:
+            md5Hash     = file['md5Checksum']
+            sha256Hash  = file['sha256Checksum']
+
+        except Exception as e:
+            md5Hash     = "NA"
+            sha256Hash  = "NA"
+
+        #need to handle ' chars in names
+        name = escape_quotes(name)
+
+        if cur is not None:
+                query = f'INSERT INTO {DB_TABLE} (name,id,mimeType,size,md5Checksum,sha256Checksum,status) VALUES (\'{name}\', \'{id}\', \'{google_mimetype}\', {size}, \'{md5Hash}\', \'{sha256Hash}\', True)'
+                cur.execute(query)
+
+    if cur is not None:
+        conn.commit()
+
+    return results.get('nextPageToken')
+
+def new_main():
+    max_threads = 12
+    # current_threads = 0 threading.activeCount()
+
+    # Get list of files and add them to the database
+    tGetFileList1 = threading.Thread(target=getFileThread, args=())
+    tGetFileList1.start()
+    # Fill in folder structure?
+    # tGetFolderStructure = threading.Thread()
+
+    # Start downloading files
+    tDownloadFile1 = threading.Thread()
+
+
 def main():
     parser = parse_arguments()
     args   = parser.parse_args()
@@ -548,83 +731,12 @@ def main():
         global AUTH_METHOD
         AUTH_METHOD = args.auth_method
 
-    if AUTH_METHOD == "serviceaccount":
-        http_auth = get_credentials()
-        service   = discovery.build('drive', 'v3', http=http_auth)
-        debug_progress('created Google Drive service object')
-    
-    elif AUTH_METHOD == "oauth":
-        """Shows basic usage of the Drive v3 API.
-        Prints the names and ids of the first 10 files the user has access to.
-        """
-        creds = None
-        # The file token.json stores the user's access and refresh tokens, and is
-        # created automatically when the authorization flow completes for the first
-        # time.
-        if os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        # If there are no (valid) credentials available, let the user log in.
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    'credentials.json', SCOPES)
-                creds = flow.run_local_server(port=0)
-            # Save the credentials for the next run
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
-
-        try:
-            service = build('drive', 'v3', credentials=creds)
-
-        except HttpError as error:
-            # TODO(developer) - Handle errors from drive API.
-            exit_with_error('An error occured: \'{0}\''.format(error))
-
-    else:
-        exit_with_error("Error: please select a supported auth method.'serviceaccount' or 'oauth' are currently supported. {AUTH_METHOD} is not supported.")
+    service = authToGoogle()
 
     conn = False
-    if DB_ENABLED:
-        conn = db_connect()
-        if conn != False:
-            cur = conn.cursor()
+    conn = db_setup(DB_DATABASE, DB_TABLE)
 
-            try:
-                # Not the safest way to build a query, but for local use, this should be acceptable
-                # Create the database if it doesn't exist
-                query = f'CREATE DATABASE IF NOT EXISTS `{DB_DATABASE}`'
-                cur.execute(query)
-
-                # Selects the database
-                query = f'USE `{DB_DATABASE}`'
-                cur.execute(query)
-                
-                # Creates the table if it doesn't exist
-                query = f"""CREATE TABLE IF NOT EXISTS `{DB_TABLE}` (
-	            `id` VARCHAR(50) NOT NULL COLLATE 'latin1_swedish_ci',
-	            `name` VARCHAR(260) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
-	            `mimeType` VARCHAR(100) NULL DEFAULT NULL COLLATE 'latin1_swedish_ci',
-	            `size` BIGINT(20) NULL DEFAULT NULL,
-                `md5Checksum` VARCHAR(33) NULL DEFAULT NULL,
-                `status` VARCHAR(50) NULL DEFAULT NULL
-                )
-                COLLATE='latin1_swedish_ci'
-                ENGINE=InnoDB
-                ;"""
-                cur.execute(query)
-
-            except Exception as e:
-                print(f"Error: {e}")
-
-    resource = {
-    "oauth2": creds,
-    "id": "1AeewIhj5g95yNfkmAnahjv24aipMnPEr",
-    "fields": "files(name,id)",
-}               
-    res = getfilelist.GetFileList(resource)
-    print(res)
+    new_main()
 
     first_pass = True
     nextPageToken = None
@@ -634,7 +746,7 @@ def main():
         results = service.files().list(pageSize=pageSize,
                                        pageToken=nextPageToken,
                                        fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
-        results.get('nextPageToken')
+        nextPageToken = results.get('nextPageToken')
         
         filesListed += pageSize
         if (filesListed % 10000) == 0:
@@ -648,24 +760,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-def getFileListAndAddToDB():
-    results = service.files().list(pageSize=pageSize,
-                                       pageToken=nextPageToken,
-                                       fields="nextPageToken, kind, files(id, name, mimeType, size, md5Checksum, webContentLink)").execute()
-
-    for result in results:
-        # add to db
-
-def new_main():
-    max_threads = 12
-    # current_threads = 0 threading.activeCount()
-
-    # Get list of files and add them to the database
-    tGetFileList1 = threading.Thread()
-
-    # Fill in folder structure?
-    # tGetFolderStructure = threading.Thread()
-
-    # Start downloading files
-    tDownloadFile1 = threading.Thread()
